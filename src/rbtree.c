@@ -1,45 +1,13 @@
 #include "rbtree.h"
+#include "fault_alloc.h"   /* rb_malloc / rb_free: the allocation seam */
 
-#include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------------
- * Allocation seam.
- *
- * Every allocation in this file goes through these two wrappers, never
- * through malloc/free directly. HW2 replaces the bodies with a
- * fault-injecting allocator; keeping the seam here means that change never
- * has to touch the tree code itself.
- * --------------------------------------------------------------------- */
-
-/* Blocks handed out by rb_malloc that rb_free has not taken back yet.
- * Tests check this is 0 once the tree is destroyed; anything else is a leak,
- * and the number is how many blocks leaked. */
-static size_t rb_live_allocs = 0;
-
-static void *rb_malloc(size_t n)
-{
-    void *p = malloc(n);
-    if (p != NULL) { // if memory is NULL, there is no memory or an issue with malloc, still want to allocate it.
-        rb_live_allocs++;
-    }
-    return p;
-}
-
-static void rb_free(void *p)
-{
-    if (p != NULL) {
-        rb_live_allocs--; // free(NULL) is legal and frees nothing, count would drop below the truth.
-    }
-    free(p);
-}
-
-/* Deliberately not in rbtree.h -- that header is frozen. Test files declare
- * this themselves and the linker connects them. */
-size_t rb_debug_live_allocs(void)
-{
-    return rb_live_allocs;
-}
+/* Every allocation in this file goes through rb_malloc/rb_free, never
+ * malloc/free directly. They live in tests/fault_alloc.c now, so the fault
+ * injector can sit underneath the tree without the tree code changing.
+ * <stdlib.h> is deliberately not included: a direct malloc/free here would
+ * fail to compile. */
 
 /* A node is red or black. There is no third color -- deletion's "doubly
  * black" is a way of counting, never a value stored in a node. */

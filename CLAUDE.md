@@ -40,7 +40,9 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - Nick runs git commit/push himself unless he says otherwise for that case.
 
 ## Code map
-- `src/rbtree.c` — the whole tree (HW1 code, imported unchanged in M0).
+- `src/rbtree.c` — the whole tree (HW1 code; only change so far: its static
+  allocation wrappers moved out to tests/fault_alloc.c). Does not include
+  <stdlib.h>, so a direct malloc/free there fails to compile.
   Node struct has a `parent` pointer. Missing children are NULL (no sentinel).
   `node_alloc`/`node_release` are the only place a node's two allocations
   are made and freed. `rotate_left/right` own the `t->root` update.
@@ -48,8 +50,12 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
   `validate_subtree`, `destroy_subtree`, `foreach_subtree` are still
   recursive (destroy and foreach must lose that in M3).
 - `src/pool.c` — slab pool (M2). Does not exist yet.
-- `tests/fault_alloc.{c,h}` — fault injector and the `rb_malloc`/`rb_free`
-  seam (M1). Does not exist yet; today the wrappers are `static` in rbtree.c.
+- `tests/fault_alloc.h` — declarations from spec 8.1 (functions only, no
+  variables). `tests/fault_alloc.c` — `rb_malloc`/`rb_free` forwarding to
+  malloc/free, the live-block counter (`static`, private to that file) and
+  `rb_debug_live_allocs()`, which the HW1 tests declare themselves. Linked
+  into both binaries. `fault_alloc_arm/disarm/total` are declared but not
+  written yet (M1 slice 2).
 - `tests/test_rbtree.c` — unit tests plus the table-driven delete cases.
 - `tests/fuzz.c` — random ops vs. a flag-array model, xorshift PRNG, seeded.
 
@@ -71,5 +77,8 @@ runs in GitHub Actions on every push once the workflow is added; "green under
 memcheck" means that run is green. Never report memcheck as passing locally.
 
 ## Status
-M0 in progress: HW1 tree imported unchanged, new frozen header swapped in.
-Nothing from M1-M3 exists yet.
+M0 done: HW1 tree imported, new frozen header, allocation seam moved to
+tests/fault_alloc.c. HW1 battery green under make test and make asan
+(memcheck not yet run, see Environment).
+Next: M1 slice 2 -- injector (arm/disarm/total) + fault sweep harness,
+failing on purpose, no src/ edits.

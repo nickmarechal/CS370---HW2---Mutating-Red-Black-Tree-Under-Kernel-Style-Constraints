@@ -2,13 +2,13 @@ CC := gcc
 CFLAGS := -std=c23 -Wall -Wextra -Werror -g -O1 -Iinclude -Itests
 
 SRC := src/rbtree.c
-TSRC := tests/test_rbtree.c tests/fault_alloc.c
+TSRC := tests/test_rbtree.c tests/fault_alloc.c tests/sweep.c
 BIN := build/test_rbtree
 FUZZBIN := build/fuzz
 
 all: $(BIN) $(FUZZBIN)
 
-$(BIN): $(SRC) $(TSRC) include/rbtree.h tests/fault_alloc.h
+$(BIN): $(SRC) $(TSRC) include/rbtree.h tests/fault_alloc.h tests/sweep.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(SRC) $(TSRC) -o $@
 

@@ -1,4 +1,5 @@
 #include "rbtree.h"
+#include "sweep.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1054,6 +1055,9 @@ int main(void)
     test_single_node_every_op();
     test_long_keys();
     test_value_free_sees_finished_tree();
+
+    failures += fault_injector_selftest();
+    failures += fault_sweep(rb_create, "plain");
 
     if (failures != 0) {
         fprintf(stderr, "test_rbtree: %d check(s) FAILED\n", failures);

@@ -15,7 +15,10 @@ size_t rb_debug_live_allocs(void);
  * clean run into a reported failure instead of a hang. */
 enum { NKEYS = 200, KEY_STRIDE = 37, SWEEP_CAP = 100000 };
 
-static char keys[NKEYS][8];             /* "s000" .. "s199": index order = sorted */
+/* "s000" .. "s199": index order = sorted. 16 bytes, not 8: under UBSan, gcc
+ * cannot prove the loop index stays 0..199, so it checks room for any int
+ * ("s" + 11 chars + '\0' = 13) and -Werror fails the asan build otherwise. */
+static char keys[NKEYS][16];
 
 /* ---- reporting -------------------------------------------------------- */
 

@@ -23,7 +23,9 @@ size_t rb_debug_live_allocs(void);
 
 enum { KEYSPACE = 512, VALIDATE_EVERY = 100, DEFAULT_SEED = 20260914 };
 
-static char keys[KEYSPACE][8];              /* "k0000" .. "k0511" */
+/* "k0000" .. "k0511". 16 bytes so gcc's UBSan build can see any int fits
+ * ("k" + 11 chars + '\0' = 13); with 8, -Werror=format-truncation fails. */
+static char keys[KEYSPACE][16];
 
 struct model {
     bool   present[KEYSPACE];

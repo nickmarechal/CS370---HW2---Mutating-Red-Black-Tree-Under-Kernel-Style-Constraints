@@ -429,6 +429,66 @@ static void test_foreach_empty_and_after_delete(void)
     expect_clean("test_foreach_empty_and_after_delete");
 }
 
+/* M3 contract: a callback may READ the tree while the walk runs, and the
+ * walk leaves the tree exactly as it found it (no fingerprints). */
+struct reader {
+    const rbtree_t *t;
+    const char     *prev;           /* last key seen; keys must strictly increase */
+    size_t          n;
+    int             bad_find;       /* rb_find(key) inside fn != the value fn got */
+    int             bad_validate;   /* rb_validate inside fn != 0 */
+    int             bad_order;
+};
+
+static void reader_cb(const char *key, void *value, void *ctx)
+{
+    struct reader *r = ctx;
+    if (rb_find(r->t, key) != value) {
+        r->bad_find++;
+    }
+    if (rb_validate(r->t) != 0) {
+        r->bad_validate++;
+    }
+    if (r->prev != NULL && strcmp(r->prev, key) >= 0) {
+        r->bad_order++;
+    }
+    r->prev = key;
+    r->n++;
+}
+
+static void test_foreach_callback_may_read(void)
+{
+    enum { N = 300 };
+    static int values[N];
+    char key[16];
+
+    rbtree_t *t = create_tree(NULL);
+    CHECK(t != NULL, "rb_create returned NULL");
+    for (int i = 0; i < N; i++) {
+        snprintf(key, sizeof key, "r%03d", (i * 7) % N);   /* 7 shares no factor with 300 */
+        values[i] = i;
+        CHECK(rb_insert(t, key, &values[i]) == 0, "insert %s failed", key);
+    }
+
+    struct reader r1 = { .t = t };
+    rb_foreach(t, reader_cb, &r1);
+    CHECK(r1.n == N, "walk visited %zu keys, expected %d", r1.n, N);
+    CHECK(r1.bad_find == 0, "rb_find inside the callback was wrong %d time(s)", r1.bad_find);
+    CHECK(r1.bad_validate == 0, "tree invalid inside the callback %d time(s)", r1.bad_validate);
+    CHECK(r1.bad_order == 0, "keys out of order %d time(s)", r1.bad_order);
+
+    /* Same tree afterwards: valid, same size, and a second walk agrees. */
+    CHECK(rb_validate(t) == 0, "tree invalid after the walk");
+    CHECK(rb_size(t) == N, "size changed by the walk: %zu", rb_size(t));
+    struct reader r2 = { .t = t };
+    rb_foreach(t, reader_cb, &r2);
+    CHECK(r2.n == N && r2.bad_find == 0 && r2.bad_order == 0,
+          "second walk disagrees with the first");
+
+    rb_destroy(t);
+    expect_clean("test_foreach_callback_may_read");
+}
+
 /* ---- delete tests (M2) --------------------------------------------------
  * rb_delete has to handle several tree shapes, and a test cannot see node
  * colors. So each case picks an insertion order whose resulting shape is
@@ -1061,6 +1121,7 @@ int main(int argc, char **argv)
 
     test_foreach_in_order();
     test_foreach_empty_and_after_delete();
+    test_foreach_callback_may_read();
 
     test_delete_cases();
     test_delete_only_node_then_reuse();

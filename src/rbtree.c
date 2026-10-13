@@ -532,23 +532,44 @@ size_t rb_size(const rbtree_t *t)
  * everything larger. Recursion is allowed here for this assignment (HW2
  * takes it away). The callback must not insert into or delete from the
  * tree it is walking -- the walk holds pointers into it. */
-static void foreach_subtree(const struct rbnode *n,
-                            void (*fn)(const char *key, void *value, void *ctx),
-                            void *ctx)
+/* The node right after n in key order, or NULL if n is the last one.
+ * If n has a right subtree, the next key is that subtree's smallest.
+ * Otherwise climb: while we come up from a RIGHT child, that parent was
+ * already visited (it is smaller than n). The first parent we reach from a
+ * LEFT child is the next one. Climbing off the root means n was the last. */
+static const struct rbnode *successor(const struct rbnode *n)
 {
-    if (n == NULL) {
-        return;
+    if (n->right != NULL) {
+        return tree_minimum(n->right);
     }
-    foreach_subtree(n->left, fn, ctx);
-    fn(n->key, n->value, ctx);
-    foreach_subtree(n->right, fn, ctx);
+    const struct rbnode *p = n->parent;
+    while (p != NULL && n == p->right) {
+        n = p;
+        p = p->parent;
+    }
+    return p;
 }
 
+/* In-order walk with no recursion: the only state is one node pointer, and
+ * the way back up lives in the nodes' own parent pointers. The tree is never
+ * modified, so the const on t is honest.
+ *
+ * Callback contract: fn may READ the tree (rb_find, rb_size, rb_validate,
+ * even another rb_foreach). It must not insert or delete: the next node is
+ * worked out after fn returns, from the node fn was just given, so removing
+ * nodes under the walk is undefined. A callback that never returns: don't. */
 void rb_foreach(const rbtree_t *t,
                 void (*fn)(const char *key, void *value, void *ctx),
                 void *ctx)
 {
-    foreach_subtree(t->root, fn, ctx);
+    if (t->root == NULL) {
+        return;
+    }
+    /* Invariant: every key smaller than n's has been handed to fn exactly
+     * once, and n's and the larger ones not yet. */
+    for (const struct rbnode *n = tree_minimum(t->root); n != NULL; n = successor(n)) {
+        fn(n->key, n->value, ctx);
+    }
 }
 
 /* In-order walk of one subtree, checking every rule at once.

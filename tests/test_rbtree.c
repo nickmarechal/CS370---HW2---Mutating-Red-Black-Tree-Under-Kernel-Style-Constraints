@@ -1,5 +1,6 @@
 #include "rbtree.h"
 #include "sweep.h"
+#include "test_pool.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1056,6 +1057,7 @@ int main(void)
     test_long_keys();
     test_value_free_sees_finished_tree();
 
+    failures += pool_unit_tests();
     failures += fault_injector_selftest();
     failures += fault_sweep(rb_create, "plain");
 

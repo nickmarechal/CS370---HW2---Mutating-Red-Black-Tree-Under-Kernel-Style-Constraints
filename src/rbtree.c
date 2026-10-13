@@ -1,5 +1,6 @@
 #include "rbtree.h"
 #include "fault_alloc.h"   /* rb_malloc / rb_free: the allocation seam */
+#include "pool.h"          /* node storage for pooled trees (M2) */
 
 #include <string.h>
 
@@ -26,19 +27,32 @@ struct rbtree {
     struct rbnode   *root;       /* NULL when the tree is empty */
     rb_value_free_fn value_free; /* NULL means the values are not ours to free */
     size_t           count;      /* keys held, so rb_size answers instantly */
+    rb_pool_t       *pool;       /* where nodes live; NULL = one rb_malloc per node */
 };
 
 /* ------------------------------------------------------------------------
  * Node lifetime. One node is TWO allocations: the struct, and a private copy
  * of the key. Both are made here and both are freed in node_release, so the
- * ownership rules live in exactly one place.
+ * ownership rules live in exactly one place. In a pooled tree the struct
+ * comes from t->pool instead of rb_malloc; the key copy is variable-length,
+ * so it always comes from rb_malloc.
  * --------------------------------------------------------------------- */
+
+/* Give a node's struct back to wherever it came from. */
+static void node_storage_free(const rbtree_t *t, struct rbnode *n)
+{
+    if (t->pool != NULL) {
+        pool_free(t->pool, n);
+    } else {
+        rb_free(n);
+    }
+}
 
 /* Returns NULL if either allocation fails. On failure nothing is left
  * allocated -- the caller never sees a half-built node. */
-static struct rbnode *node_alloc(const char *key, void *value)
+static struct rbnode *node_alloc(const rbtree_t *t, const char *key, void *value)
 {
-    struct rbnode *n = rb_malloc(sizeof *n);
+    struct rbnode *n = (t->pool != NULL) ? pool_alloc(t->pool) : rb_malloc(sizeof *n);
     if (n == NULL) {
         return NULL;
     }
@@ -58,7 +72,7 @@ static struct rbnode *node_alloc(const char *key, void *value)
     return n;
 
 fail:
-    rb_free(n);
+    node_storage_free(t, n);
     return NULL;
 }
 
@@ -71,7 +85,7 @@ static void node_release(const rbtree_t *t, struct rbnode *n)
         t->value_free(n->value);
     }
     rb_free(n->key);
-    rb_free(n);
+    node_storage_free(t, n);
 }
 
 /* rb_validate failure codes. 0 means every rule holds. Nonzero names the rule
@@ -231,6 +245,23 @@ rbtree_t *rb_create(rb_value_free_fn value_free)
     t->root = NULL;
     t->value_free = value_free;
     t->count = 0;
+    t->pool = NULL;
+    return t;
+}
+
+/* Two allocations: the tree struct, then the pool (which takes no slab until
+ * the first node is inserted). If the pool fails, give the struct back. */
+rbtree_t *rb_create_pooled(rb_value_free_fn value_free)
+{
+    rbtree_t *t = rb_create(value_free);
+    if (t == NULL) {
+        return NULL;
+    }
+    t->pool = pool_create(sizeof(struct rbnode));
+    if (t->pool == NULL) {
+        rb_free(t);                         /* unwind the first allocation */
+        return NULL;
+    }
     return t;
 }
 
@@ -267,7 +298,7 @@ int rb_insert(rbtree_t *t, const char *key, void *value)
 
     /* Fell off the tree: cur is NULL and parent is the node to hang from.
      * cmp still holds the comparison against parent, so it tells us which side. */
-    struct rbnode *n = node_alloc(key, value);
+    struct rbnode *n = node_alloc(t, key, value);
     if (n == NULL) {
         return -1;                          /* tree unchanged; caller keeps value */
     }
@@ -626,5 +657,6 @@ void rb_destroy(rbtree_t *t)
     t->root = NULL;
     t->count = 0;
     destroy_subtree(t, root);
+    pool_destroy(t->pool);      /* every slab, after the walk is done with them; NULL-safe */
     rb_free(t);
 }

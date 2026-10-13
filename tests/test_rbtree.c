@@ -2,6 +2,7 @@
 #include "sweep.h"
 #include "test_pool.h"
 #include "test_bigstack.h"
+#include "fault_alloc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -488,6 +489,43 @@ static void test_foreach_callback_may_read(void)
 
     rb_destroy(t);
     expect_clean("test_foreach_callback_may_read");
+}
+
+/* M3: walking and tearing down must never allocate. rb_destroy is how memory
+ * comes BACK, so it must not be able to fail for lack of memory. The proof:
+ * the allocation total does not move across either call, and a fault armed
+ * on the very next rb_malloc is never reached. */
+static void test_walk_and_destroy_allocate_nothing(void)
+{
+    enum { N = 500 };
+    char key[16];
+
+    rbtree_t *t = create_tree(counting_free);
+    CHECK(t != NULL, "rb_create returned NULL");
+    for (int i = 0; i < N; i++) {
+        int *v = malloc(sizeof *v);
+        CHECK(v != NULL, "malloc failed");
+        *v = i;
+        snprintf(key, sizeof key, "w%03d", (i * 7) % N);    /* 7 shares no factor with 500 */
+        CHECK(rb_insert(t, key, v) == 0, "insert %s failed", key);
+    }
+
+    struct collect c = { .n = 0 };
+    values_freed = 0;
+    long total0 = fault_alloc_total();
+    fault_alloc_arm(1);                     /* the very next rb_malloc would fail */
+
+    rb_foreach(t, collect_cb, &c);
+    CHECK(fault_alloc_total() == total0, "rb_foreach called rb_malloc %ld time(s)",
+          fault_alloc_total() - total0);
+    rb_destroy(t);
+    CHECK(fault_alloc_total() == total0, "rb_destroy called rb_malloc %ld time(s)",
+          fault_alloc_total() - total0);
+
+    fault_alloc_disarm();
+    CHECK(c.n == N, "foreach visited %zu keys, expected %d", c.n, N);
+    CHECK(values_freed == N, "destroy freed %d value(s), expected %d", values_freed, N);
+    expect_clean("test_walk_and_destroy_allocate_nothing");
 }
 
 /* ---- delete tests (M2) --------------------------------------------------
@@ -1134,6 +1172,7 @@ int main(int argc, char **argv)
     test_foreach_in_order();
     test_foreach_empty_and_after_delete();
     test_foreach_callback_may_read();
+    test_walk_and_destroy_allocate_nothing();
 
     test_delete_cases();
     test_delete_only_node_then_reuse();

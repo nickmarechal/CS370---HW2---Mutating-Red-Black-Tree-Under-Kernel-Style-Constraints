@@ -528,10 +528,6 @@ size_t rb_size(const rbtree_t *t)
     return (t == NULL) ? 0 : t->count;
 }
 
-/* In-order walk of one subtree: everything smaller, then this node, then
- * everything larger. Recursion is allowed here for this assignment (HW2
- * takes it away). The callback must not insert into or delete from the
- * tree it is walking -- the walk holds pointers into it. */
 /* The node right after n in key order, or NULL if n is the last one.
  * If n has a right subtree, the next key is that subtree's smallest.
  * Otherwise climb: while we come up from a RIGHT child, that parent was

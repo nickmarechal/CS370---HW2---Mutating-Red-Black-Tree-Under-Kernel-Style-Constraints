@@ -652,18 +652,6 @@ int rb_validate(const rbtree_t *t)
     return RB_OK;
 }
 
-/* Free a whole subtree, children before parent, so no freed node is ever
- * read again. Recursion is allowed in this assignment (HW2 takes it away). */
-static void destroy_subtree(const rbtree_t *t, struct rbnode *n)
-{
-    if (n == NULL) {
-        return;
-    }
-    destroy_subtree(t, n->left);
-    destroy_subtree(t, n->right);
-    node_release(t, n);
-}
-
 void rb_destroy(rbtree_t *t)
 {
     if (t == NULL) {
@@ -677,7 +665,31 @@ void rb_destroy(rbtree_t *t)
     struct rbnode *root = t->root;
     t->root = NULL;
     t->count = 0;
-    destroy_subtree(t, root);
-    pool_destroy(t->pool);      /* every slab, after the walk is done with them; NULL-safe */
+
+    /* Teardown by rotating the tree into a right spine (spec Figure 5). No
+     * recursion, no allocation, and the only state is the one pointer root.
+     * Colors and parent pointers go stale and are never read again: a tree
+     * being destroyed does not have to stay a red-black tree.
+     *
+     * Invariant (DRAFT -- Nick to rewrite in his words): root reaches every
+     * node not freed yet, and no node that has been freed.
+     * Measure: total nodes plus nodes off the right spine. A rotation lifts
+     * root->left onto the spine (one fewer off it); a free removes one spine
+     * node (one fewer in total). Down by exactly 1 every time and never
+     * negative, so the loop ends after at most 2n - 1 iterations. */
+    while (root != NULL) {
+        if (root->left != NULL) {
+            struct rbnode *l = root->left;      /* right-rotate at root */
+            root->left = l->right;
+            l->right   = root;
+            root       = l;
+        } else {
+            struct rbnode *next = root->right;  /* save it BEFORE root is freed */
+            node_release(t, root);
+            root = next;
+        }
+    }
+
+    pool_destroy(t->pool);      /* every slab, after the loop is done with them; NULL-safe */
     rb_free(t);
 }

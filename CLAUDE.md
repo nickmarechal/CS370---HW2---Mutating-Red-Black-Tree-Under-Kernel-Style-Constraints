@@ -10,7 +10,8 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - `make test` runs each binary twice: plain trees, then `--pooled`.
 - Fuzzer by hand: `./build/fuzz <ops> [seed] [--pooled]`. A failure prints
   its seed and a reproduce command; rerun with that, then shrink the op count.
-- Unit tests by hand: `./build/test_rbtree [--pooled]`.
+- Unit tests by hand: `./build/test_rbtree [--pooled] [--nodes N]` (N = size of
+  the 64 KiB-stack test, default 1000000; memcheck uses 20000).
 
 ## Hard constraints
 - NEVER modify include/rbtree.h. It is the graded contract (HW2 version,
@@ -49,8 +50,11 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
   sends the node back to the pool or `rb_free`. `rb_create_pooled` = tree
   struct + pool, unwinds the struct if the pool fails. `rotate_left/right`
   own the `t->root` update. `insert_fixup`, `delete_fixup`, `transplant`
-  allocate nothing. `validate_subtree`, `destroy_subtree`, `foreach_subtree`
-  are still recursive (destroy and foreach must lose that in M3).
+  allocate nothing. M3: `rb_foreach` walks with `successor()` over parent
+  pointers (one node pointer of state, tree never modified); `rb_destroy`
+  rotates the tree into a right spine (one pointer of state; measure = total
+  nodes + nodes off the spine). Neither recurses or allocates.
+  `validate_subtree` is still recursive (allowed; depth <= 2 log2(n+1)).
 - `src/pool.{c,h}` — slab pool (M2). 4096-byte slabs from `rb_malloc`,
   in-band `struct slab` header, stride rounded to `alignof(max_align_t)`
   (8 on the Mac, 16 on Linux CI: compute geometry, never hardcode 85).
@@ -67,6 +71,8 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - `tests/test_rbtree.c` — HW1 unit tests + delete table; `create_tree`
   pointer is `rb_create` or `rb_create_pooled` (`--pooled`); main also
   calls the pool tests, injector self-test and sweep.
+- `tests/test_bigstack.{c,h}` — M3: n-node tree (default 10^6), then
+  rb_foreach + rb_destroy inside a pthread with a 64 KiB stack.
 - `tests/fuzz.c` — random ops vs. a flag-array model, xorshift PRNG, seeded.
 - `.github/workflows/battery.yml` — test, memcheck, asan on Ubuntu with
   gcc-14 on every push. memcheck before asan (valgrind can't run ASan builds).
@@ -91,11 +97,9 @@ memcheck as passing locally. gcc-14 there is stricter than the Mac's clang
 (e.g. -Wformat-truncation under UBSan), so a local green is not the last word.
 
 ## Status
-M0 done. M1 done: fault sweep green plain + pooled; Actions green (test,
-memcheck, asan). M2 code done: pool + unit tests, tree uses it when pooled,
-whole battery + sweep pass with --pooled (pooled clean run: 205 allocs);
-Actions green on 09adb70.
-Still open for M2: fresh-session hostile review (spec Step 7), Nick's
-DEVLOG/REFLECTION entries (header, alignment, pool_stats, poison, kmem_cache).
-Next: M3 -- rb_destroy and rb_foreach with no recursion and O(1) space;
-10^6 nodes under a 64 KB pthread stack (big case behind a flag for memcheck).
+M0, M1, M2, M3 code done and green on Actions (test, valgrind memcheck,
+ASan+UBSan+LSan), plain and pooled. Last code commit fdd3370 (review fixes:
+foreach/destroy proven to allocate nothing; stale comment removed).
+Reach (M4, COW snapshots) not attempted; rb_snapshot left undefined.
+Open: Nick's wording for the DRAFT invariant comment in rb_destroy; DEVLOG
+is still the empty template; spec wants a fresh-context review session.

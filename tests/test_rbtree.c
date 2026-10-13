@@ -1,6 +1,7 @@
 #include "rbtree.h"
 #include "sweep.h"
 #include "test_pool.h"
+#include "test_bigstack.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1094,9 +1095,20 @@ static void test_value_free_sees_finished_tree(void)
 
 int main(int argc, char **argv)
 {
-    bool pooled = (argc == 2 && strcmp(argv[1], "--pooled") == 0);
-    if (argc > 1 && !pooled) {
-        fprintf(stderr, "usage: %s [--pooled]\n", argv[0]);
+    bool pooled    = false;
+    long big_nodes = 1000000;               /* M3: spec asks for >= 10^6; memcheck passes fewer */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--pooled") == 0) {
+            pooled = true;
+        } else if (strcmp(argv[i], "--nodes") == 0 && i + 1 < argc) {
+            big_nodes = strtol(argv[++i], NULL, 10);
+        } else {
+            big_nodes = 0;                  /* unknown argument: fall into usage */
+            break;
+        }
+    }
+    if (big_nodes <= 0) {
+        fprintf(stderr, "usage: %s [--pooled] [--nodes N]\n", argv[0]);
         return 2;
     }
     const char *mode = pooled ? "pooled" : "plain";
@@ -1135,6 +1147,7 @@ int main(int argc, char **argv)
     failures += pool_unit_tests();
     failures += fault_injector_selftest();
     failures += fault_sweep(create_tree, mode);
+    failures += big_stack_test(create_tree, mode, big_nodes);
 
     if (failures != 0) {
         fprintf(stderr, "test_rbtree [%s]: %d check(s) FAILED\n", mode, failures);

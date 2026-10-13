@@ -74,8 +74,10 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - `tests/test_bigstack.{c,h}` — M3: n-node tree (default 10^6), then
   rb_foreach + rb_destroy inside a pthread with a 64 KiB stack.
 - `tests/fuzz.c` — random ops vs. a flag-array model, xorshift PRNG, seeded.
-- `.github/workflows/battery.yml` — test, memcheck, asan on Ubuntu with
-  gcc-14 on every push. memcheck before asan (valgrind can't run ASan builds).
+- CI: `.github/workflows/battery.yml` (test, memcheck, asan on Ubuntu,
+  gcc-14) ran on every push through 3749549, all green. Removed afterwards
+  because Canvas rejects `.yml` files in the submission; it is still in git
+  history (added in 859dac0) if it needs to come back.
 
 ## Ownership
 Three separately-owned things per node: the node, the tree's private key
@@ -91,8 +93,9 @@ copy, and the caller's `void *value`.
 
 ## Environment
 `make memcheck` cannot run on this Mac (no valgrind on Apple Silicon), and
-macOS ASan has no LeakSanitizer. Valgrind and LSan run in GitHub Actions on
-every push; "green under memcheck" means that run is green. Never report
+macOS ASan has no LeakSanitizer. Valgrind and LSan ran in GitHub Actions
+(workflow now removed for Canvas, see Code map); "green under memcheck" means
+those runs. Never report
 memcheck as passing locally. gcc-14 there is stricter than the Mac's clang
 (e.g. -Wformat-truncation under UBSan), so a local green is not the last word.
 

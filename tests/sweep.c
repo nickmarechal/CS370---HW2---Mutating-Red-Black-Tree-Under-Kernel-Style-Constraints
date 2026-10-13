@@ -221,15 +221,20 @@ static void run_scenario(rbtree_t *(*create)(rb_value_free_fn), long fault_at)
     long accepted = 0;                  /* values the tree took ownership of */
     long freed0   = sweep_values_freed;
 
+    /* Leaks are measured against the count at the start of THIS run, not
+     * against 0: the counter is never reset, so one leaked block would
+     * otherwise make every later run fail too and hide which n leaked. */
+    size_t live0 = rb_debug_live_allocs();
+
     long     total0 = fault_alloc_total();
     rbtree_t *t     = create(sweep_free);
     bool     hit    = hit_fault(total0, fault_alloc_total(), fault_at);
 
     if (t == NULL) {
         SWEEP_CHECK(hit, "create returned NULL without an injected fault");
-        SWEEP_CHECK(rb_debug_live_allocs() == 0,
-                    "failed create left %zu block(s) allocated",
-                    rb_debug_live_allocs());
+        SWEEP_CHECK(rb_debug_live_allocs() == live0,
+                    "failed create leaked %zu block(s) during this run",
+                    rb_debug_live_allocs() - live0);
         return;
     }
     SWEEP_CHECK(!hit, "create hit the injected fault but returned a tree");
@@ -251,8 +256,9 @@ static void run_scenario(rbtree_t *(*create)(rb_value_free_fn), long fault_at)
     check_model(t, &m, "end of run");
 
     rb_destroy(t);
-    SWEEP_CHECK(rb_debug_live_allocs() == 0, "leaked %zu block(s) after rb_destroy",
-                rb_debug_live_allocs());
+    SWEEP_CHECK(rb_debug_live_allocs() == live0,
+                "leaked %zu block(s) during this run (checked after rb_destroy)",
+                rb_debug_live_allocs() - live0);
     SWEEP_CHECK(sweep_values_freed - freed0 == accepted,
                 "ownership: tree accepted %ld value(s) but freed %ld",
                 accepted, sweep_values_freed - freed0);

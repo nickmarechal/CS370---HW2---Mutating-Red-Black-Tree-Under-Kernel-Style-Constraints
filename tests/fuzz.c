@@ -113,23 +113,37 @@ static const char *check_tree(const rbtree_t *t, const struct model *m)
     return NULL;
 }
 
+/* --pooled anywhere in argv: same fuzz on a pooled tree (M2). */
+static bool pooled = false;
+
 static void die(rbtree_t *t, long op, unsigned long long seed, const char *what,
                 const char *detail)
 {
     fprintf(stderr, "fuzz: FAIL at op %ld (seed %llu): %s -- %s\n"
-                    "      reproduce with: ./build/fuzz %ld %llu\n",
-            op, seed, what, detail, op + 1, seed);
+                    "      reproduce with: ./build/fuzz %ld %llu%s\n",
+            op, seed, what, detail, op + 1, seed, pooled ? " --pooled" : "");
     rb_destroy(t);
     exit(1);
 }
 
 int main(int argc, char **argv)
 {
+    /* Pull --pooled out first so <op-count> [seed] keep their positions. */
+    int nargs = 1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--pooled") == 0) {
+            pooled = true;
+        } else {
+            argv[nargs++] = argv[i];
+        }
+    }
+    argc = nargs;
+
     long ops = (argc > 1) ? strtol(argv[1], NULL, 10) : 0;
     unsigned long long seed = (argc > 2) ? strtoull(argv[2], NULL, 10)
                                          : DEFAULT_SEED;
     if (ops <= 0) {
-        fprintf(stderr, "usage: %s <op-count> [seed]\n", argv[0]);
+        fprintf(stderr, "usage: %s <op-count> [seed] [--pooled]\n", argv[0]);
         return 2;
     }
     rng_state = seed ? seed : 1;            /* xorshift must never be 0 */
@@ -139,7 +153,7 @@ int main(int argc, char **argv)
     }
 
     static struct model m;                  /* zeroed: nothing present */
-    rbtree_t *t = rb_create(free);          /* the tree owns the values */
+    rbtree_t *t = pooled ? rb_create_pooled(free) : rb_create(free); /* tree owns values */
     if (t == NULL) {
         fprintf(stderr, "fuzz: rb_create failed\n");
         return 1;
@@ -232,8 +246,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("fuzz: %ld ops ok, seed %llu, %ld full checks, peak size %zu, "
+    printf("fuzz [%s]: %ld ops ok, seed %llu, %ld full checks, peak size %zu, "
            "final size %zu, 0 blocks leaked\n",
-           ops, seed, validations, max_size, final_size);
+           pooled ? "pooled" : "plain", ops, seed, validations, max_size, final_size);
     return 0;
 }

@@ -17,7 +17,7 @@ $(FUZZBIN): $(SRC) tests/fuzz.c tests/fault_alloc.c include/rbtree.h src/pool.h 
 	$(CC) $(CFLAGS) $(SRC) tests/fuzz.c tests/fault_alloc.c -o $@
 
 test: $(BIN) $(FUZZBIN)
-	./$(BIN) && ./$(FUZZBIN) 100000
+	./$(BIN) && ./$(BIN) --pooled && ./$(FUZZBIN) 100000 && ./$(FUZZBIN) 100000 --pooled
 
 asan: CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 asan: clean test
@@ -26,7 +26,11 @@ memcheck: all
 	valgrind --leak-check=full --show-leak-kinds=all \
 	--error-exitcode=1 ./$(BIN)
 	valgrind --leak-check=full --show-leak-kinds=all \
+	--error-exitcode=1 ./$(BIN) --pooled
+	valgrind --leak-check=full --show-leak-kinds=all \
 	--error-exitcode=1 ./$(FUZZBIN) 20000
+	valgrind --leak-check=full --show-leak-kinds=all \
+	--error-exitcode=1 ./$(FUZZBIN) 20000 --pooled
 
 clean:
 	rm -rf build

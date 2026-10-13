@@ -10,6 +10,10 @@
  * is a test-only hook, not part of the public contract. */
 size_t rb_debug_live_allocs(void);
 
+/* Which constructor every test uses. main switches it with --pooled, so the
+ * whole suite runs once on plain trees and once on pooled trees (M2). */
+static rbtree_t *(*create_tree)(rb_value_free_fn) = rb_create;
+
 /* ---- tiny test harness ------------------------------------------------ */
 
 static int failures = 0;
@@ -46,7 +50,7 @@ static void expect_clean(const char *test)
 
 static void test_empty_tree(void)
 {
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     CHECK(t != NULL, "rb_create returned NULL");
     CHECK(rb_size(t) == 0, "fresh tree size %zu, expected 0", rb_size(t));
     CHECK(rb_validate(t) == 0, "empty tree failed validate");
@@ -64,7 +68,7 @@ static void test_insert_and_find(void)
     const size_t n = sizeof keys / sizeof keys[0];
     int values[7] = { 10, 20, 30, 40, 50, 60, 70 };
 
-    rbtree_t *t = rb_create(NULL);      /* NULL: tree does not own values */
+    rbtree_t *t = create_tree(NULL);      /* NULL: tree does not own values */
 
     for (size_t i = 0; i < n; i++) {
         CHECK(rb_insert(t, keys[i], &values[i]) == 0,
@@ -94,7 +98,7 @@ static void test_insert_and_find(void)
 static void test_overwrite_frees_old_value(void)
 {
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);    /* tree OWNS values now */
+    rbtree_t *t = create_tree(counting_free);    /* tree OWNS values now */
 
     int *first = malloc(sizeof *first);
     int *second = malloc(sizeof *second);
@@ -125,7 +129,7 @@ static void test_overwrite_same_pointer_is_noop(void)
      * pointer for rb_destroy to free a second time. Under ASan the old code
      * aborts with a double-free here; without ASan the counts catch it. */
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     int *v = malloc(sizeof *v);
@@ -148,7 +152,7 @@ static void test_overwrite_same_pointer_is_noop(void)
 static void test_destroy_frees_every_value(void)
 {
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     const int n = 25;
 
     for (int i = 0; i < n; i++) {
@@ -171,7 +175,7 @@ static void test_keys_are_copied(void)
 {
     /* The caller's string buffer changes after insert. The tree must still
      * find the key by its ORIGINAL contents, proving it made its own copy. */
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     char buf[16];
     int v = 99;
 
@@ -234,7 +238,7 @@ static void test_stale_root_left_rotation(void)
      * b becomes the new root. If t->root still pointed at a, a would have
      * no children and validate would report the wrong count. */
     const char *const keys[] = { "a", "b", "c" };
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     insert_all(t, keys, 3, "stale_root_left");
     expect_reachable(t, keys, 3, "stale_root_left");
     rb_destroy(t);
@@ -245,7 +249,7 @@ static void test_stale_root_right_rotation(void)
 {
     /* Mirror: c, b, a descending forces a RIGHT rotation at the root. */
     const char *const keys[] = { "c", "b", "a" };
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     insert_all(t, keys, 3, "stale_root_right");
     expect_reachable(t, keys, 3, "stale_root_right");
     rb_destroy(t);
@@ -257,7 +261,7 @@ static void test_zigzag_left_right(void)
     /* a, c, b: b hangs under c which hangs under a -- a kink. Fixing it
      * takes TWO rotations (case 2 to straighten, case 3 to repair). */
     const char *const keys[] = { "a", "c", "b" };
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     insert_all(t, keys, 3, "zigzag_lr");
     expect_reachable(t, keys, 3, "zigzag_lr");
     rb_destroy(t);
@@ -268,7 +272,7 @@ static void test_zigzag_right_left(void)
 {
     /* Mirror kink: c, a, b. */
     const char *const keys[] = { "c", "a", "b" };
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     insert_all(t, keys, 3, "zigzag_rl");
     expect_reachable(t, keys, 3, "zigzag_rl");
     rb_destroy(t);
@@ -281,7 +285,7 @@ static void test_red_uncle_recolor(void)
      * d's parent c is red and its uncle a is red -> case 1, recolor only.
      * Then e under d: parent d red, uncle NULL (black) -> rotation. */
     const char *const keys[] = { "b", "a", "c", "d", "e" };
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     insert_all(t, keys, 5, "red_uncle");
     expect_reachable(t, keys, 5, "red_uncle");
     rb_destroy(t);
@@ -293,7 +297,7 @@ static void test_ascending_stress(void)
     /* Worst case for an unbalanced tree: 1000 keys in sorted order would
      * make a 1000-deep straight line. Validate after every insert proves
      * the fixup kept it balanced, and hits every case many times over. */
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     char key[16];
     for (int i = 0; i < 1000; i++) {
         snprintf(key, sizeof key, "k%04d", i);
@@ -325,7 +329,7 @@ static void test_random_stress(void)
         order[j] = tmp;
     }
 
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     char key[16];
     for (int i = 0; i < N; i++) {
         snprintf(key, sizeof key, "r%04d", order[i]);
@@ -372,7 +376,7 @@ static void test_foreach_in_order(void)
     const size_t n = sizeof keys / sizeof keys[0];
     int values[sizeof keys / sizeof keys[0]];
 
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     CHECK(t != NULL, "rb_create returned NULL");
     for (size_t i = 0; i < n; i++) {
         values[i] = (int)i;
@@ -402,7 +406,7 @@ static void test_foreach_in_order(void)
 
 static void test_foreach_empty_and_after_delete(void)
 {
-    rbtree_t *t = rb_create(NULL);
+    rbtree_t *t = create_tree(NULL);
     CHECK(t != NULL, "rb_create returned NULL");
 
     struct collect c = { .n = 0 };
@@ -475,7 +479,7 @@ static rbtree_t *build_owned(const struct del_case *c, int *vals[])
         fprintf(stderr, "%s: %zu keys, harness holds %d\n", c->name, n, MAX_CASE_KEYS);
         exit(1);
     }
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     if (t == NULL) {
         fprintf(stderr, "%s: rb_create failed\n", c->name);
         exit(1);
@@ -640,7 +644,7 @@ static void test_delete_only_node_then_reuse(void)
     /* a(B) alone. Deleting it must leave t->root NULL, not dangling: the
      * follow-up insert would otherwise write through a freed node. */
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     int *v = malloc(sizeof *v);
@@ -678,7 +682,7 @@ static void test_delete_absent(void)
      * everything, so most of this passes for free until delete is real --
      * it earns its keep as a regression test afterward. */
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     CHECK(rb_delete(t, "anything") == -1, "delete on empty tree not -1");
@@ -723,7 +727,7 @@ static void test_delete_absent(void)
 static void test_empty_tree_every_op(void)
 {
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     /* Three rounds. The tree is empty at the top of each one: fresh the
@@ -776,7 +780,7 @@ static void test_single_node_every_op(void)
      * overwrite-only-key -- the spec's third named edge case: replacing the
      * value of the only key frees the old value exactly once, size stays 1. */
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     int *v1 = malloc(sizeof *v1);
@@ -856,7 +860,7 @@ static void test_long_keys(void)
      * walk must sort them by that final character, with lengths intact. */
     enum { PREFIX_LEN = 1 << 16, HUGE_LEN = 1 << 20, NKEYS = 7 };
     values_freed = 0;
-    rbtree_t *t = rb_create(counting_free);
+    rbtree_t *t = create_tree(counting_free);
     CHECK(t != NULL, "rb_create returned NULL");
 
     /* sorted[] is in sorted order: bare prefix, then +'0'..+'4', then the
@@ -975,7 +979,7 @@ static void test_value_free_sees_finished_tree(void)
     /* b(B)[a(B), d(R)[c(B), e(B)[-, f(R)]]] -- a shape from the delete table
      * where deleting a needs a fixup, after which d is the root with two
      * children (the hoist path). */
-    spy_tree = rb_create(spying_free);
+    spy_tree = create_tree(spying_free);
     CHECK(spy_tree != NULL, "rb_create returned NULL");
     const char *ins = "badcef";
     for (const char *p = ins; *p != '\0'; p++) {
@@ -1028,8 +1032,18 @@ static void test_value_free_sees_finished_tree(void)
 
 /* ---- main ------------------------------------------------------------- */
 
-int main(void)
+int main(int argc, char **argv)
 {
+    bool pooled = (argc == 2 && strcmp(argv[1], "--pooled") == 0);
+    if (argc > 1 && !pooled) {
+        fprintf(stderr, "usage: %s [--pooled]\n", argv[0]);
+        return 2;
+    }
+    const char *mode = pooled ? "pooled" : "plain";
+    if (pooled) {
+        create_tree = rb_create_pooled;
+    }
+
     test_empty_tree();
     test_insert_and_find();
     test_overwrite_frees_old_value();
@@ -1059,12 +1073,12 @@ int main(void)
 
     failures += pool_unit_tests();
     failures += fault_injector_selftest();
-    failures += fault_sweep(rb_create, "plain");
+    failures += fault_sweep(create_tree, mode);
 
     if (failures != 0) {
-        fprintf(stderr, "test_rbtree: %d check(s) FAILED\n", failures);
+        fprintf(stderr, "test_rbtree [%s]: %d check(s) FAILED\n", mode, failures);
         return 1;
     }
-    printf("test_rbtree: all tests passed, 0 blocks leaked\n");
+    printf("test_rbtree [%s]: all tests passed, 0 blocks leaked\n", mode);
     return 0;
 }

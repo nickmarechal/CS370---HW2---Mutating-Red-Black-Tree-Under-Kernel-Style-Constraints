@@ -7,8 +7,10 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - Build & unit tests: `make test`
 - Sanitizers: `make asan`   Valgrind: `make memcheck` (Linux only, see Environment)
 - A change is DONE only when all three pass. Always run them; show output.
-- Fuzzer by hand: `./build/fuzz <ops> [seed]`. A failure prints its seed and
-  a reproduce command; rerun with that, then shrink the op count.
+- `make test` runs each binary twice: plain trees, then `--pooled`.
+- Fuzzer by hand: `./build/fuzz <ops> [seed] [--pooled]`. A failure prints
+  its seed and a reproduce command; rerun with that, then shrink the op count.
+- Unit tests by hand: `./build/test_rbtree [--pooled]`.
 
 ## Hard constraints
 - NEVER modify include/rbtree.h. It is the graded contract (HW2 version,
@@ -40,24 +42,34 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 - Nick runs git commit/push himself unless he says otherwise for that case.
 
 ## Code map
-- `src/rbtree.c` — the whole tree (HW1 code; only change so far: its static
-  allocation wrappers moved out to tests/fault_alloc.c). Does not include
-  <stdlib.h>, so a direct malloc/free there fails to compile.
-  Node struct has a `parent` pointer. Missing children are NULL (no sentinel).
-  `node_alloc`/`node_release` are the only place a node's two allocations
-  are made and freed. `rotate_left/right` own the `t->root` update.
-  `insert_fixup`, `delete_fixup`, `transplant` allocate nothing.
-  `validate_subtree`, `destroy_subtree`, `foreach_subtree` are still
-  recursive (destroy and foreach must lose that in M3).
-- `src/pool.c` — slab pool (M2). Does not exist yet.
-- `tests/fault_alloc.h` — declarations from spec 8.1 (functions only, no
-  variables). `tests/fault_alloc.c` — `rb_malloc`/`rb_free` forwarding to
-  malloc/free, the live-block counter (`static`, private to that file) and
-  `rb_debug_live_allocs()`, which the HW1 tests declare themselves. Linked
-  into both binaries. `fault_alloc_arm/disarm/total` are declared but not
-  written yet (M1 slice 2).
-- `tests/test_rbtree.c` — unit tests plus the table-driven delete cases.
+- `src/rbtree.c` — the tree. No <stdlib.h>, so a direct malloc/free fails to
+  compile. Node has a `parent` pointer; missing children are NULL.
+  `struct rbtree` has `pool` (NULL = plain tree). `node_alloc`/`node_release`
+  are the only place a node's two allocations happen; `node_storage_free`
+  sends the node back to the pool or `rb_free`. `rb_create_pooled` = tree
+  struct + pool, unwinds the struct if the pool fails. `rotate_left/right`
+  own the `t->root` update. `insert_fixup`, `delete_fixup`, `transplant`
+  allocate nothing. `validate_subtree`, `destroy_subtree`, `foreach_subtree`
+  are still recursive (destroy and foreach must lose that in M3).
+- `src/pool.{c,h}` — slab pool (M2). 4096-byte slabs from `rb_malloc`,
+  in-band `struct slab` header, stride rounded to `alignof(max_align_t)`
+  (8 on the Mac, 16 on Linux CI: compute geometry, never hardcode 85).
+  `pool_alloc`: free list, else bump, else new slab. `pool_free` poisons
+  the slot with 0xDD, then writes the link over the front. `pool_check`
+  walks the free list for tests. `pool.h` is private, not the frozen header.
+- `tests/fault_alloc.{c,h}` — `rb_malloc`/`rb_free` seam + fault injector
+  (`arm(n)` fails the n-th call once; `total` counts every call). Live-block
+  counter is `static`; read it via `rb_debug_live_allocs()`.
+- `tests/sweep.{c,h}` — fault sweep: 200 insert / 100 delete / 50 overwrite,
+  n = 1.. until a clean run; five `assert_unchanged` checks; leaks measured
+  per run. Takes the create function, so it runs plain and pooled.
+- `tests/test_pool.{c,h}` — pool unit tests through the pool API only.
+- `tests/test_rbtree.c` — HW1 unit tests + delete table; `create_tree`
+  pointer is `rb_create` or `rb_create_pooled` (`--pooled`); main also
+  calls the pool tests, injector self-test and sweep.
 - `tests/fuzz.c` — random ops vs. a flag-array model, xorshift PRNG, seeded.
+- `.github/workflows/battery.yml` — test, memcheck, asan on Ubuntu with
+  gcc-14 on every push. memcheck before asan (valgrind can't run ASan builds).
 
 ## Ownership
 Three separately-owned things per node: the node, the tree's private key
@@ -72,13 +84,18 @@ copy, and the caller's `void *value`.
   `rb_free`.
 
 ## Environment
-`make memcheck` cannot run on this Mac (no valgrind on Apple Silicon). Valgrind
-runs in GitHub Actions on every push once the workflow is added; "green under
-memcheck" means that run is green. Never report memcheck as passing locally.
+`make memcheck` cannot run on this Mac (no valgrind on Apple Silicon), and
+macOS ASan has no LeakSanitizer. Valgrind and LSan run in GitHub Actions on
+every push; "green under memcheck" means that run is green. Never report
+memcheck as passing locally. gcc-14 there is stricter than the Mac's clang
+(e.g. -Wformat-truncation under UBSan), so a local green is not the last word.
 
 ## Status
-M0 done: HW1 tree imported, new frozen header, allocation seam moved to
-tests/fault_alloc.c. HW1 battery green under make test and make asan
-(memcheck not yet run, see Environment).
-Next: M1 slice 2 -- injector (arm/disarm/total) + fault sweep harness,
-failing on purpose, no src/ edits.
+M0 done. M1 done: fault sweep green plain + pooled; Actions green (test,
+memcheck, asan). M2 code done: pool + unit tests, tree uses it when pooled,
+whole battery + sweep pass with --pooled (pooled clean run: 205 allocs);
+Actions green on 09adb70.
+Still open for M2: fresh-session hostile review (spec Step 7), Nick's
+DEVLOG/REFLECTION entries (header, alignment, pool_stats, poison, kmem_cache).
+Next: M3 -- rb_destroy and rb_foreach with no recursion and O(1) space;
+10^6 nodes under a 64 KB pthread stack (big case behind a flag for memcheck).

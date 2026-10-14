@@ -8,7 +8,7 @@ is only an index; the transcript files themselves are untouched.
 
 | File | Ran (Mountain Time) | What it covers |
 |---|---|---|
-| `8545f1b6-685c-4092-b3b0-55d5bdd6ab51.jsonl` | 2026-10-08 17:14 → 2026-10-13 16:31 | All of HW2: reading the spec, M0–M3, review, write-up checks, packaging |
+| `8545f1b6-685c-4092-b3b0-55d5bdd6ab51.jsonl` | 2026-10-08 17:14 → 2026-10-13 20:53 | All of HW2: reading the spec, M0–M3, review, write-up checks, packaging, autograder fix |
 
 This was the only Claude Code session used for HW2. It was started from the
 `CS 370` course folder, so the source file lives in
@@ -33,3 +33,4 @@ taken at the time of the commit that added it.
 | 2026-10-13 midday | M3: foreach walk, paper drill → right-spine destroy, 10^6-node 64 KiB stack test | `2560b0a` `f3ad7fa` `74bb3f8` |
 | 2026-10-13 afternoon | Review pass; findings 1–2 fixed; PROMPTLOG and REFLECTION | `fdd3370` `c936427` |
 | 2026-10-13 late afternoon | Final transcript copy; tar/zip built; Canvas rejected `.gitkeep` and the CI `.yml`, both removed | `3749549` `a2b946f` |
+| 2026-10-13 evening | Autograder M2 finding (destructor count); traced to the same-pointer overwrite skip; test first, then fix | `a45586d` |

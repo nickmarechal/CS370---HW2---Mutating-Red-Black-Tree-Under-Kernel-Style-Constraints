@@ -83,8 +83,10 @@ mutates it three times (fault sweep, slab pool, O(1)-space teardown).
 Three separately-owned things per node: the node, the tree's private key
 copy, and the caller's `void *value`.
 - rb_insert returns 0 -> tree owns value. Returns -1 -> caller still owns it.
-- Overwrite frees the OLD value via value_free first -- unless the caller
-  passed back the very pointer the tree already holds; then nothing is freed.
+- Overwrite stores the new pointer, then frees the OLD value via value_free,
+  EVERY time -- even when the caller passes back the very pointer the tree
+  already holds (header contract; HW2 autograder counts it). HW1 skipped that
+  case; changed 2026-10-13 after the M2 grader finding.
 - rb_delete frees the key copy and (if owned) the value, via node_release.
   The two-children hoist SWAPS key/value pointers, never copies.
 - Rotations change topology only, never ownership. Delete never allocates.

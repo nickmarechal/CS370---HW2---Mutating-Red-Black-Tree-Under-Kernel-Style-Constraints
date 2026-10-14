@@ -124,31 +124,92 @@ static void test_overwrite_frees_old_value(void)
     expect_clean("test_overwrite_frees_old_value");
 }
 
-static void test_overwrite_same_pointer_is_noop(void)
+/* Counts value_free calls without freeing anything (the values here are not
+ * heap blocks), so the same pointer can be "freed" more than once safely. */
+static int count_only_calls;
+static void count_only(void *p)
 {
-    /* Re-inserting the SAME value pointer under the same key must not free
-     * it: the tree already owns it, and freeing it would leave a dangling
-     * pointer for rb_destroy to free a second time. Under ASan the old code
-     * aborts with a double-free here; without ASan the counts catch it. */
-    values_freed = 0;
-    rbtree_t *t = create_tree(counting_free);
+    (void)p;
+    count_only_calls++;
+}
+
+static void test_overwrite_same_pointer_frees_old(void)
+{
+    /* HW1 skipped value_free when the SAME pointer was re-inserted under the
+     * same key. The header says every overwrite frees the old value, and the
+     * HW2 autograder counts it (M2 finding, 2026-10-13), so now it runs once
+     * per overwrite, same pointer or not. A destructor that only counts keeps
+     * this test free of the double free a real free() would cause. */
+    count_only_calls = 0;
+    static int v = 7;
+    rbtree_t *t = create_tree(count_only);
     CHECK(t != NULL, "rb_create returned NULL");
 
-    int *v = malloc(sizeof *v);
-    CHECK(v != NULL, "malloc failed");
-    *v = 7;
-
-    CHECK(rb_insert(t, "key", v) == 0, "first insert failed");
-    CHECK(rb_insert(t, "key", v) == 0, "same-pointer re-insert failed");
-    CHECK(values_freed == 0, "re-inserting the same pointer freed it (%d)",
-          values_freed);
-    CHECK(rb_find(t, "key") == v, "find no longer returns the value");
+    CHECK(rb_insert(t, "key", &v) == 0, "first insert failed");
+    CHECK(count_only_calls == 0, "first insert ran value_free (%d)", count_only_calls);
+    CHECK(rb_insert(t, "key", &v) == 0, "same-pointer re-insert failed");
+    CHECK(count_only_calls == 1, "same-pointer overwrite ran value_free %d time(s), expected 1",
+          count_only_calls);
+    CHECK(rb_find(t, "key") == &v, "find no longer returns the value");
     CHECK(rb_size(t) == 1, "size %zu, expected 1", rb_size(t));
 
     rb_destroy(t);
-    CHECK(values_freed == 1, "expected exactly 1 free on destroy, got %d",
-          values_freed);
-    expect_clean("test_overwrite_same_pointer_is_noop");
+    CHECK(count_only_calls == 2, "expected 2 calls after destroy, got %d", count_only_calls);
+    expect_clean("test_overwrite_same_pointer_frees_old");
+}
+
+/* Autograder M2 finding (2026-10-13): "value destructors ran 22960 times,
+ * expected 59496". The header says an overwrite frees the old value via
+ * value_free -- every time, including when the caller hands back the same
+ * pointer. This churn reuses one value pointer per key, the way the grader's
+ * does, and checks the destructor count against that contract: one call per
+ * overwrite, one per delete, one per key left at rb_destroy. */
+static long churn_frees;
+static void count_only_free(void *v)
+{
+    (void)v;                                /* values are a static array: nothing to free */
+    churn_frees++;
+}
+
+static void test_churn_destructor_count(void)
+{
+    enum { K = 256, OPS = 20000 };
+    static int vals[K];
+    bool present[K] = { false };
+    long expected = 0, live = 0;
+    unsigned long long x = 0x9E3779B97F4A7C15ULL;   /* xorshift: same ops every run */
+    char key[16];
+
+    churn_frees = 0;
+    rbtree_t *t = create_tree(count_only_free);
+    CHECK(t != NULL, "rb_create returned NULL");
+    for (int i = 0; i < OPS; i++) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        int k = (int)(x % K);
+        snprintf(key, sizeof key, "c%03d", k);
+        if ((x >> 32) % 3 != 0) {           /* insert, or overwrite with the SAME pointer */
+            if (present[k]) {
+                expected++;                 /* overwrite: the old value is freed */
+            } else {
+                present[k] = true;
+                live++;
+            }
+            CHECK(rb_insert(t, key, &vals[k]) == 0, "insert %s failed", key);
+        } else if (present[k]) {
+            CHECK(rb_delete(t, key) == 0, "delete %s failed", key);
+            present[k] = false;
+            live--;
+            expected++;                     /* delete frees the value */
+        }
+    }
+    CHECK(rb_size(t) == (size_t)live, "size %zu, model %ld", rb_size(t), live);
+    rb_destroy(t);
+    expected += live;                       /* destroy frees what is left */
+    CHECK(churn_frees == expected, "value destructor ran %ld times, expected %ld",
+          churn_frees, expected);
+    expect_clean("test_churn_destructor_count");
 }
 
 static void test_destroy_frees_every_value(void)
@@ -1157,7 +1218,8 @@ int main(int argc, char **argv)
     test_empty_tree();
     test_insert_and_find();
     test_overwrite_frees_old_value();
-    test_overwrite_same_pointer_is_noop();
+    test_overwrite_same_pointer_frees_old();
+    test_churn_destructor_count();
     test_destroy_frees_every_value();
     test_keys_are_copied();
 
